@@ -1,0 +1,222 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - apps/python-api/**
+      - infra/**
+      - manifests/**
+
+variables:
+  DOCKER_REGISTRY_SERVER_URL: $(ACR_REGISTRY_URL)
+  DOCKER_REGISTRY_SERVER_USERNAME: $(ACR_USERNAME)
+  DOCKER_REGISTRY_SERVER_PASSWORD: $(ACR_PASSWORD)
+  DOCKER_IMAGE_NAME: python-api
+  HELM_VERSION: 3.12.0
+  TERRAFORM_VERSION: 1.5.0
+  SONAR_ORGANIZATION: $(SONAR_ORG)
+
+stages:
+  - stage: Build
+    displayName: 'Build & Test'
+    jobs:
+      - job: BuildAndTest
+        displayName: 'Build Docker Image & Run Tests'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+          
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+            displayName: 'Set Python version to 3.11'
+          
+          - task: Bash@3
+            displayName: 'Install dependencies'
+            inputs:
+              targetType: 'inline'
+              script: |
+                cd apps/python-api
+                pip install --upgrade pip
+                pip install -r src/requirements.txt
+          
+          - task: Bash@3
+            displayName: 'Run unit tests with coverage'
+            inputs:
+              targetType: 'inline'
+              script: |
+                cd apps/python-api
+                python -m pytest tests/ -v --junitxml=junit.xml --cov=src --cov-report=xml --cov-report=html
+          
+          - task: PublishTestResults@2
+            displayName: 'Publish test results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'apps/python-api/junit.xml'
+              testRunTitle: 'API Unit Tests'
+            condition: always()
+          
+          - task: PublishCodeCoverageResults@1
+            displayName: 'Publish code coverage'
+            inputs:
+              codeCoverageTool: Cobertura
+              summaryFileLocation: 'apps/python-api/coverage.xml'
+              reportDirectory: 'apps/python-api/htmlcov'
+            condition: always()
+          
+          - task: SonarCloudPrepare@1
+            displayName: 'Prepare SonarCloud'
+            inputs:
+              SonarCloud: 'sonarcloud-connection'
+              organization: '$(SONAR_ORGANIZATION)'
+              scannerMode: 'CLI'
+              configMode: 'file'
+          
+          - task: SonarCloudAnalyze@1
+            displayName: 'Run SonarCloud analysis'
+          
+          - task: SonarCloudPublish@1
+            displayName: 'Publish SonarCloud quality gate'
+            inputs:
+              pollingTimeoutSec: '300'
+          
+          - task: Docker@2
+            displayName: 'Build Docker image'
+            inputs:
+              command: 'build'
+              Dockerfile: 'apps/python-api/Dockerfile'
+              repository: '$(DOCKER_IMAGE_NAME)'
+              tags: |
+                $(Build.BuildId)
+                latest
+              arguments: '--no-cache'
+          
+          - task: Docker@2
+            displayName: 'Push Docker image to ACR'
+            inputs:
+              command: 'push'
+              containerRegistry: 'acr-connection'
+              repository: '$(DOCKER_IMAGE_NAME)'
+              tags: |
+                $(Build.BuildId)
+                latest
+
+  - stage: Deploy
+    displayName: 'Deploy to AKS (Dev)'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: ProvisionInfra
+        displayName: 'Provision Infrastructure with Terraform'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+          
+          - task: AzureCLI@2
+            displayName: 'Terraform Init'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(System.DefaultWorkingDirectory)/infra
+                terraform init \
+                  -backend-config="resource_group_name=$(TF_STATE_RG)" \
+                  -backend-config="storage_account_name=$(TF_STATE_STORAGE)" \
+                  -backend-config="container_name=tfstate" \
+                  -backend-config="key=dev.tfstate"
+          
+          - task: AzureCLI@2
+            displayName: 'Terraform Plan'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(System.DefaultWorkingDirectory)/infra
+                terraform plan -var-file="env/dev/terraform.tfvars" -out=tfplan
+          
+          - task: AzureCLI@2
+            displayName: 'Terraform Apply'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(System.DefaultWorkingDirectory)/infra
+                terraform apply -auto-approve tfplan
+          
+          - task: AzureCLI@2
+            displayName: 'Get Application Gateway Public IP'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(System.DefaultWorkingDirectory)/infra
+                APPGW_IP=$(terraform output -raw appgw_public_ip)
+                echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_IP"
+                echo "===========================================" 
+                echo "Application Gateway Deployment Successful!"
+                echo "==========================================="
+                echo "Public IP Address: $APPGW_IP"
+                echo "API Endpoint: http://$APPGW_IP/sum?a=1&b=2"
+                echo "Documentation: File APPLICATION_GATEWAY_SETUP.md"
+                echo "==========================================="
+
+      - job: DeployToAKS
+        displayName: 'Deploy to AKS with Helm'
+        dependsOn: ProvisionInfra
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+          
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: '$(HELM_VERSION)'
+          
+          - task: Bash@3
+            displayName: 'Get AKS credentials'
+            inputs:
+              targetType: 'inline'
+              script: |
+                az account set --subscription $(AZURE_SUBSCRIPTION_ID)
+                az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME)
+          
+          - task: Bash@3
+            displayName: 'Update Helm chart values'
+            inputs:
+              targetType: 'inline'
+              script: |
+                REGISTRY_URL=$(ACR_REGISTRY_URL)
+                IMAGE_TAG=$(Build.BuildId)
+                sed -i "s|<registry>|${REGISTRY_URL}|g" manifests/helm/python-api/values.yaml
+                sed -i "s|<image_tag>|${IMAGE_TAG}|g" manifests/helm/python-api/values.yaml
+          
+          - task: Bash@3
+            displayName: 'Deploy Helm chart to AKS'
+            inputs:
+              targetType: 'inline'
+              script: |
+                helm upgrade \
+                  --install python-api \
+                  --namespace default \
+                  --values manifests/helm/python-api/values.yaml \
+                  --set image.repository="$(ACR_REGISTRY_URL)/$(DOCKER_IMAGE_NAME)" \
+                  --set image.tag="$(Build.BuildId)" \
+                  manifests/helm/python-api
+          
+          - task: Bash@3
+            displayName: 'Verify Helm deployment'
+            inputs:
+              targetType: 'inline'
+              script: |
+                kubectl rollout status deployment/python-api -n default --timeout=5m
+                kubectl get pods -n default
+                kubectl get svc -n default

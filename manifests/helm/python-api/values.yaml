@@ -1,5 +1,62 @@
+replicaCount: 2
+
 image:
   repository: <set-by-pipeline>
   tag: latest
+  pullPolicy: IfNotPresent
 
-replicaCount: 1
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: azure-application-gateway
+  annotations: {}
+  hosts: []
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+livenessProbe:
+  httpGet:
+    path: /docs
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /docs
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# ==========================================
+# Application Gateway Integration
+# ==========================================
+# Using Azure Application Gateway (AGIC) for external access
+# Access via: http://<APPGW_PUBLIC_IP>:80/
+# IP-only access (no domain names required)
+appGateway:
+  enabled: true
+  publicIP: "" # Auto-populated from Terraform output
