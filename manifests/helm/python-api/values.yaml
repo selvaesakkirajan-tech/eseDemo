@@ -1,0 +1,5 @@
+image:
+  repository: <set-by-pipeline>
+  tag: latest
+
+replicaCount: 1
