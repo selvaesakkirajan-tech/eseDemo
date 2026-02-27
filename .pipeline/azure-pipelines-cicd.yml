@@ -1,0 +1,150 @@
+trigger: none
+pr: none
+
+parameters:
+- name: deployDev
+  type: boolean
+  default: true
+- name: deployQa
+  type: boolean
+  default: false
+- name: runTests
+  type: boolean
+  default: true
+- name: runSonarCloud
+  type: boolean
+  default: true
+
+variables:
+  pythonVersion: '3.11'
+  imageName: 'python-api'
+  # Supply these via Service Connections/Variables in ADO:
+  # ACR_SERVICE_CONNECTION, ACR_LOGIN_SERVER
+  # AZURERM_SERVICE_CONNECTION
+  # SONARCLOUD_ORG
+
+pool: { vmImage: 'ubuntu-latest' }
+
+stages:
+- stage: Guard
+  jobs:
+  - job: Validate
+    steps:
+    - bash: |
+        if [ "${{ parameters.deployDev }}" != "true" ] && [ "${{ parameters.deployQa }}" != "true" ]; then
+          echo "##vso[task.logissue type=error]Select at least one environment (dev and/or qa)."
+          exit 1
+        fi
+      displayName: "Validate inputs"
+
+- stage: Build
+  dependsOn: Guard
+  jobs:
+  - job: BuildImage
+    steps:
+    - task: UsePythonVersion@0
+      inputs: { versionSpec: '$(pythonVersion)' }
+    - task: Docker@2
+      displayName: "Build & Push image to ACR"
+      inputs:
+        containerRegistry: '$(ACR_SERVICE_CONNECTION)'
+        repository: '$(imageName)'
+        command: 'buildAndPush'
+        Dockerfile: 'apps/python-api/Dockerfile'
+        tags: |
+          $(Build.BuildId)
+
+- stage: Tests
+  dependsOn: Build
+  condition: and(succeeded(), eq('${{ parameters.runTests }}', 'true'))
+  jobs:
+  - job: Pytests
+    steps:
+    - task: UsePythonVersion@0
+      inputs: { versionSpec: '$(pythonVersion)' }
+    - script: |
+        pip install -r apps/python-api/src/requirements.txt
+        pip install pytest pytest-cov
+        pytest -q apps/python-api/tests --maxfail=1 --disable-warnings --cov=apps/python-api/src
+      displayName: "Run unit tests"
+
+- stage: SonarCloud
+  dependsOn:
+    - ${{ if eq(parameters.runTests, 'true') }}: [Tests]
+    - ${{ if ne(parameters.runTests, 'true') }}: [Build]
+  condition: and(succeeded(), eq('${{ parameters.runSonarCloud }}', 'true'))
+  jobs:
+  - job: Analyze
+    steps:
+    - task: SonarCloudPrepare@1
+      inputs:
+        SonarCloud: 'SonarCloudServiceConnection'
+        organization: '$(SONARCLOUD_ORG)'
+        scannerMode: 'CLI'
+        configMode: 'manual'
+        cliProjectKey: 'eseDemo-python-api'
+        cliProjectName: 'eseDemo-python-api'
+        cliSources: 'apps/python-api/src'
+    - task: SonarCloudAnalyze@1
+    - task: SonarCloudPublish@1
+      inputs: { pollingTimeoutSec: '300' }
+
+- stage: Deploy_Dev
+  displayName: "Deploy to DEV (AKS + AGIC)"
+  dependsOn:
+    - ${{ if eq(parameters.runSonarCloud, 'true') }}: [SonarCloud]
+    - ${{ if ne(parameters.runSonarCloud, 'true') }}:
+      - ${{ if eq(parameters.runTests, 'true') }}: [Tests]
+      - ${{ if ne(parameters.runTests, 'true') }}: [Build]
+  condition: and(succeeded(), eq('${{ parameters.deployDev }}', 'true'))
+  jobs:
+  - deployment: Dev
+    environment: dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Kubernetes@1
+            displayName: "Helm upgrade python-api (dev)"
+            inputs:
+              connectionType: 'Azure Resource Manager'
+              azureSubscriptionEndpoint: '$(AZURERM_SERVICE_CONNECTION)'
+              azureResourceGroup: 'rg-eseDemo-dev'
+              kubernetesCluster: 'aks-eseDemo-dev'
+              command: 'helmUpgrade'
+              chartType: 'FilePath'
+              chartPath: 'manifests/helm/python-api'
+              releaseName: 'python-api'
+              namespace: 'dev'
+              valueFile: 'manifests/helm/python-api/values.yaml'
+              arguments: >-
+                --set image.repository=$(ACR_LOGIN_SERVER)/$(imageName)
+                --set image.tag=$(Build.BuildId)
+
+- stage: Deploy_QA
+  displayName: "Deploy to QA (AKS + AGIC)"
+  dependsOn: Deploy_Dev
+  condition: and(succeeded(), eq('${{ parameters.deployQa }}', 'true'))
+  jobs:
+  - deployment: Qa
+    environment: qa
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Kubernetes@1
+            displayName: "Helm upgrade python-api (qa)"
+            inputs:
+              connectionType: 'Azure Resource Manager'
+              azureSubscriptionEndpoint: '$(AZURERM_SERVICE_CONNECTION)'
+              azureResourceGroup: 'rg-eseDemo-qa'
+              kubernetesCluster: 'aks-eseDemo-qa'
+              command: 'helmUpgrade'
+              chartType: 'FilePath'
+              chartPath: 'manifests/helm/python-api'
+              releaseName: 'python-api'
+              namespace: 'qa'
+              valueFile: 'manifests/helm/python-api/values.yaml'
+              arguments: >-
+                --set image.repository=$(ACR_LOGIN_SERVER)/$(imageName)
+                --set image.tag=$(Build.BuildId)
