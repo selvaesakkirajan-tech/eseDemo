@@ -66,24 +66,6 @@ stages:
               summaryFileLocation: 'apps/python-api/coverage.xml'
               reportDirectory: 'apps/python-api/htmlcov'
             condition: always()
-
-          # SonarQube Cloud (SonarSource extension) tasks
-          - task: SonarQubeCloudPrepare@2
-            displayName: 'Prepare SonarQube Cloud'
-            inputs:
-              SonarCloud: 'sonarcloud-connection'
-              organization: '$(SONAR_ORGANIZATION)'
-              scannerMode: 'CLI'
-              configMode: 'file'
-
-          - task: SonarQubeCloudAnalyze@2
-            displayName: 'Run SonarQube Cloud analysis'
-
-          - task: SonarQubeCloudPublish@2
-            displayName: 'Publish SonarQube Cloud quality gate'
-            inputs:
-              pollingTimeoutSec: '300'
-
           - task: Docker@2
             displayName: 'Build Docker image'
             inputs:
