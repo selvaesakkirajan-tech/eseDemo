@@ -28,12 +28,12 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-          
+
           - task: UsePythonVersion@0
             inputs:
               versionSpec: '3.11'
             displayName: 'Set Python version to 3.11'
-          
+
           - task: Bash@3
             displayName: 'Install dependencies'
             inputs:
@@ -42,7 +42,7 @@ stages:
                 cd apps/python-api
                 pip install --upgrade pip
                 pip install -r src/requirements.txt
-          
+
           - task: Bash@3
             displayName: 'Run unit tests with coverage'
             inputs:
@@ -50,7 +50,7 @@ stages:
               script: |
                 cd apps/python-api
                 python -m pytest tests/ -v --junitxml=junit.xml --cov=src --cov-report=xml --cov-report=html
-          
+
           - task: PublishTestResults@2
             displayName: 'Publish test results'
             inputs:
@@ -58,7 +58,7 @@ stages:
               testResultsFiles: 'apps/python-api/junit.xml'
               testRunTitle: 'API Unit Tests'
             condition: always()
-          
+
           - task: PublishCodeCoverageResults@1
             displayName: 'Publish code coverage'
             inputs:
@@ -66,23 +66,24 @@ stages:
               summaryFileLocation: 'apps/python-api/coverage.xml'
               reportDirectory: 'apps/python-api/htmlcov'
             condition: always()
-          
-          - task: SonarCloudPrepare@2
-            displayName: 'Prepare SonarCloud'
+
+          # SonarQube Cloud (SonarSource extension) tasks
+          - task: SonarQubeCloudPrepare@2
+            displayName: 'Prepare SonarQube Cloud'
             inputs:
               SonarCloud: 'sonarcloud-connection'
               organization: '$(SONAR_ORGANIZATION)'
               scannerMode: 'CLI'
               configMode: 'file'
-          
-          - task: SonarCloudAnalyze@2
-            displayName: 'Run SonarCloud analysis'
-          
-          - task: SonarCloudPublish@2
-            displayName: 'Publish SonarCloud quality gate'
+
+          - task: SonarQubeCloudAnalyze@2
+            displayName: 'Run SonarQube Cloud analysis'
+
+          - task: SonarQubeCloudPublish@2
+            displayName: 'Publish SonarQube Cloud quality gate'
             inputs:
               pollingTimeoutSec: '300'
-          
+
           - task: Docker@2
             displayName: 'Build Docker image'
             inputs:
@@ -93,7 +94,7 @@ stages:
                 $(Build.BuildId)
                 latest
               arguments: '--no-cache'
-          
+
           - task: Docker@2
             displayName: 'Push Docker image to ACR'
             inputs:
@@ -115,7 +116,7 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-          
+
           - task: AzureCLI@2
             displayName: 'Terraform Init'
             inputs:
@@ -129,7 +130,7 @@ stages:
                   -backend-config="storage_account_name=$(TF_STATE_STORAGE)" \
                   -backend-config="container_name=tfstate" \
                   -backend-config="key=dev.tfstate"
-          
+
           - task: AzureCLI@2
             displayName: 'Terraform Plan'
             inputs:
@@ -139,7 +140,7 @@ stages:
               inlineScript: |
                 cd $(System.DefaultWorkingDirectory)/infra
                 terraform plan -var-file="env/dev/terraform.tfvars" -out=tfplan
-          
+
           - task: AzureCLI@2
             displayName: 'Terraform Apply'
             inputs:
@@ -149,7 +150,7 @@ stages:
               inlineScript: |
                 cd $(System.DefaultWorkingDirectory)/infra
                 terraform apply -auto-approve tfplan
-          
+
           - task: AzureCLI@2
             displayName: 'Get Application Gateway Public IP'
             inputs:
@@ -160,7 +161,7 @@ stages:
                 cd $(System.DefaultWorkingDirectory)/infra
                 APPGW_IP=$(terraform output -raw appgw_public_ip)
                 echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_IP"
-                echo "===========================================" 
+                echo "==========================================="
                 echo "Application Gateway Deployment Successful!"
                 echo "==========================================="
                 echo "Public IP Address: $APPGW_IP"
@@ -175,12 +176,12 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
-          
+
           - task: HelmInstaller@1
             displayName: 'Install Helm'
             inputs:
               helmVersionToInstall: '$(HELM_VERSION)'
-          
+
           - task: Bash@3
             displayName: 'Get AKS credentials'
             inputs:
@@ -188,7 +189,7 @@ stages:
               script: |
                 az account set --subscription $(AZURE_SUBSCRIPTION_ID)
                 az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME)
-          
+
           - task: Bash@3
             displayName: 'Update Helm chart values'
             inputs:
@@ -198,7 +199,7 @@ stages:
                 IMAGE_TAG=$(Build.BuildId)
                 sed -i "s|<registry>|${REGISTRY_URL}|g" manifests/helm/python-api/values.yaml
                 sed -i "s|<image_tag>|${IMAGE_TAG}|g" manifests/helm/python-api/values.yaml
-          
+
           - task: Bash@3
             displayName: 'Deploy Helm chart to AKS'
             inputs:
@@ -211,7 +212,7 @@ stages:
                   --set image.repository="$(ACR_REGISTRY_URL)/$(DOCKER_IMAGE_NAME)" \
                   --set image.tag="$(Build.BuildId)" \
                   manifests/helm/python-api
-          
+
           - task: Bash@3
             displayName: 'Verify Helm deployment'
             inputs:
