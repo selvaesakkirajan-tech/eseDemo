@@ -67,7 +67,7 @@ stages:
               reportDirectory: 'apps/python-api/htmlcov'
             condition: always()
           
-          - task: SonarCloudPrepare@1
+          - task: SonarCloudPrepare@2
             displayName: 'Prepare SonarCloud'
             inputs:
               SonarCloud: 'sonarcloud-connection'
@@ -75,10 +75,10 @@ stages:
               scannerMode: 'CLI'
               configMode: 'file'
           
-          - task: SonarCloudAnalyze@1
+          - task: SonarCloudAnalyze@2
             displayName: 'Run SonarCloud analysis'
           
-          - task: SonarCloudPublish@1
+          - task: SonarCloudPublish@2
             displayName: 'Publish SonarCloud quality gate'
             inputs:
               pollingTimeoutSec: '300'
