@@ -2,17 +2,36 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "python-api.fullname" . }}
+  labels:
+    app: {{ include "python-api.name" . }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
-    matchLabels: { app: {{ include "python-api.name" . }} }
+    matchLabels:
+      app: {{ include "python-api.name" . }}
   template:
     metadata:
-      labels: { app: {{ include "python-api.name" . }} }
+      labels:
+        app: {{ include "python-api.name" . }}
     spec:
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          ports: [{ containerPort: 8080 }]
-          readinessProbe: { httpGet: { path: /sum?a=0&b=0, port: 8080 }, initialDelaySeconds: 5 }
-          livenessProbe: { httpGet: { path: /sum?a=0&b=0, port: 8080 }, initialDelaySeconds: 15 } 
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+ 
