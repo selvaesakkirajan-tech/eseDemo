@@ -10,13 +10,16 @@ trigger:
       - manifests/**
 
 variables:
-  DOCKER_REGISTRY_SERVER_URL: $(ACR_REGISTRY_URL)
-  DOCKER_REGISTRY_SERVER_USERNAME: $(ACR_USERNAME)
-  DOCKER_REGISTRY_SERVER_PASSWORD: $(ACR_PASSWORD)
-  DOCKER_IMAGE_NAME: python-api
-  HELM_VERSION: 3.12.0
-  TERRAFORM_VERSION: 1.5.0
-  SONAR_ORGANIZATION: $(SONAR_ORG)
+  # Link the variable group from Library
+  - group: azure-cicd
+
+  # Pipeline-level variables
+  - name: DOCKER_IMAGE_NAME
+    value: python-api
+  - name: HELM_VERSION
+    value: '3.12.0'
+  - name: TERRAFORM_VERSION
+    value: '1.5.0'
 
 stages:
   - stage: Build
@@ -100,6 +103,17 @@ stages:
           vmImage: 'ubuntu-latest'
         steps:
           - checkout: self
+
+          - task: Bash@3
+            displayName: 'Install Terraform'
+            inputs:
+              targetType: 'inline'
+              script: |
+                TERRAFORM_VERSION="$(TERRAFORM_VERSION)"
+                wget -q "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+                unzip -o "terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+                sudo mv terraform /usr/local/bin/
+                terraform --version
 
           - task: AzureCLI@2
             displayName: 'Terraform Init'
