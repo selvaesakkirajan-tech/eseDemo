@@ -122,17 +122,19 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
+              workingDirectory: '$(Build.SourcesDirectory)/infra'
               inlineScript: |
                 export ARM_CLIENT_ID=$servicePrincipalId
                 export ARM_CLIENT_SECRET=$servicePrincipalKey
                 export ARM_TENANT_ID=$tenantId
                 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                cd $(System.DefaultWorkingDirectory)/infra
                 terraform init \
                   -backend-config="resource_group_name=$(TF_STATE_RG)" \
                   -backend-config="storage_account_name=$(TF_STATE_STORAGE)" \
                   -backend-config="container_name=tfstate" \
                   -backend-config="key=dev.tfstate"
+
+                terraform validate
 
           - task: AzureCLI@2
             displayName: 'Terraform Plan'
@@ -141,13 +143,23 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
+              workingDirectory: '$(Build.SourcesDirectory)/infra'
               inlineScript: |
                 export ARM_CLIENT_ID=$servicePrincipalId
                 export ARM_CLIENT_SECRET=$servicePrincipalKey
                 export ARM_TENANT_ID=$tenantId
                 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                cd $(System.DefaultWorkingDirectory)/infra
-                terraform plan -var-file="env/dev/terraform.tfvars" -out=tfplan
+
+                TFVARS_FILE="$(Build.SourcesDirectory)/infra/env/dev/terraform.tfvars"
+
+                if [ ! -f "$TFVARS_FILE" ]; then
+                  echo "##vso[task.logissue type=error]Missing tfvars file: $TFVARS_FILE"
+                  echo "Contents of infra/env for debugging:"
+                  ls -la "$(Build.SourcesDirectory)/infra/env" || true
+                  exit 1
+                fi
+
+                terraform plan -var-file="$TFVARS_FILE" -out=tfplan
 
           - task: AzureCLI@2
             displayName: 'Terraform Apply'
@@ -156,12 +168,12 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
+              workingDirectory: '$(Build.SourcesDirectory)/infra'
               inlineScript: |
                 export ARM_CLIENT_ID=$servicePrincipalId
                 export ARM_CLIENT_SECRET=$servicePrincipalKey
                 export ARM_TENANT_ID=$tenantId
                 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                cd $(System.DefaultWorkingDirectory)/infra
                 terraform apply -auto-approve tfplan
 
           - task: AzureCLI@2
@@ -171,12 +183,12 @@ stages:
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
+              workingDirectory: '$(Build.SourcesDirectory)/infra'
               inlineScript: |
                 export ARM_CLIENT_ID=$servicePrincipalId
                 export ARM_CLIENT_SECRET=$servicePrincipalKey
                 export ARM_TENANT_ID=$tenantId
                 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                cd $(System.DefaultWorkingDirectory)/infra
                 APPGW_IP=$(terraform output -raw appgw_public_ip)
                 echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_IP"
                 echo "==========================================="
