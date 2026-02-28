@@ -159,6 +159,19 @@ stages:
                   exit 1
                 fi
 
+                # Import pre-existing Resource Group into Terraform state (idempotent)
+                RG_NAME=$(terraform console -var-file="$TFVARS_FILE" <<< '"${var.environment}-${var.project}-rg"' | tr -d '"')
+                RG_ID="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME"
+
+                if az group show --name "$RG_NAME" >/dev/null 2>&1; then
+                  if ! terraform state show azurerm_resource_group.main >/dev/null 2>&1; then
+                    echo "Resource Group exists but is not in Terraform state. Importing: $RG_ID"
+                    terraform import -var-file="$TFVARS_FILE" azurerm_resource_group.main "$RG_ID"
+                  else
+                    echo "Resource Group already present in Terraform state: $RG_NAME"
+                  fi
+                fi
+
                 terraform plan -var-file="$TFVARS_FILE" -out=tfplan
 
           - task: AzureCLI@2
