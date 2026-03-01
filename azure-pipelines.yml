@@ -264,6 +264,14 @@ stages:
                   --addons ingress-appgw \
                   --appgw-id $APPGW_ID
 
+                # Wait for AGIC pod to be ready before deploying Ingress
+                echo "Waiting for AGIC pod to be ready..."
+                kubectl wait --for=condition=ready pod \
+                  -l app=ingress-azure \
+                  -n kube-system \
+                  --timeout=5m
+                echo "AGIC pod is ready"
+
           - task: Bash@3
             displayName: 'Update Helm chart values'
             inputs:
@@ -299,5 +307,21 @@ stages:
               addSpnToEnvironment: true
               inlineScript: |
                 kubectl rollout status deployment/python-api -n default --timeout=5m
+                echo "--- Pods ---"
                 kubectl get pods -n default
+                echo "--- Services ---"
                 kubectl get svc -n default
+                echo "--- Ingress ---"
+                kubectl get ingress -n default -o wide
+                echo "--- AGIC pod status ---"
+                kubectl get pods -n kube-system -l app=ingress-azure
+                echo "--- AGIC logs (last 30 lines) ---"
+                kubectl logs -n kube-system -l app=ingress-azure --tail=30 || true
+                echo "--- Waiting 90s for App Gateway backend probe to pass ---"
+                sleep 90
+                echo "--- Final backend health check ---"
+                az network application-gateway show-backend-health \
+                  --name dev-esedemo-appgw \
+                  --resource-group $(AKS_RESOURCE_GROUP) \
+                  --query 'backendAddressPools[].backendHttpSettingsCollection[].servers[].health' \
+                  -o tsv || true
