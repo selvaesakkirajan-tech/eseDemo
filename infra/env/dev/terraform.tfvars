@@ -7,7 +7,7 @@ subnet_cidr        = "10.0.1.0/24"
 appgw_subnet_cidr  = "10.0.2.0/24"
 kubernetes_version = "1.32"
 node_count         = 2
-vm_size            = "Standard_B2s"
+vm_size            = "Standard_DC2ads_v5"
 
 # Application Gateway configuration (IP-only access, no domain)
 appgw_sku_name = "Standard_v2"
