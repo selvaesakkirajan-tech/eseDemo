@@ -236,6 +236,48 @@ stages:
               inlineScript: |
                 az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME) --overwrite-existing
 
+          - task: AzureCLI@2
+            displayName: 'Create ACR pull secret & install AGIC'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                # Create ACR image pull secret in AKS
+                kubectl create secret docker-registry acr-secret \
+                  --docker-server=$(ACR_REGISTRY_URL) \
+                  --docker-username=$(ACR_USERNAME) \
+                  --docker-password=$(ACR_PASSWORD) \
+                  --namespace=default \
+                  --dry-run=client -o yaml | kubectl apply -f -
+
+                # Install AGIC via Helm if not already installed
+                helm repo add application-gateway-kubernetes-ingress https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/ || true
+                helm repo update
+
+                AGIC_IDENTITY=$(az identity show \
+                  --name dev-esedemo-agic-identity \
+                  --resource-group $(AKS_RESOURCE_GROUP) \
+                  --query clientId -o tsv)
+
+                APPGW_ID=$(az network application-gateway show \
+                  --name dev-esedemo-appgw \
+                  --resource-group $(AKS_RESOURCE_GROUP) \
+                  --query id -o tsv)
+
+                helm upgrade --install agic application-gateway-kubernetes-ingress/ingress-azure \
+                  --namespace default \
+                  --set appgw.name=dev-esedemo-appgw \
+                  --set appgw.resourceGroup=$(AKS_RESOURCE_GROUP) \
+                  --set appgw.subscriptionId=$(AZURE_SUBSCRIPTION_ID) \
+                  --set appgw.shared=false \
+                  --set armAuth.type=aadPodIdentity \
+                  --set armAuth.identityResourceID=$(az identity show --name dev-esedemo-agic-identity --resource-group $(AKS_RESOURCE_GROUP) --query id -o tsv) \
+                  --set armAuth.identityClientID=$AGIC_IDENTITY \
+                  --set rbac.enabled=true \
+                  --wait --timeout 3m || true
+
           - task: Bash@3
             displayName: 'Update Helm chart values'
             inputs:

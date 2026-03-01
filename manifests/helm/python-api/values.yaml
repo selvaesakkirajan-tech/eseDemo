@@ -4,6 +4,7 @@ image:
   repository: <set-by-pipeline>
   tag: latest
   pullPolicy: IfNotPresent
+  pullSecret: acr-secret
 
 service:
   type: ClusterIP
@@ -11,10 +12,15 @@ service:
   targetPort: 8080
 
 ingress:
-  enabled: false
+  enabled: true
   className: azure-application-gateway
-  annotations: {}
-  hosts: []
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: Prefix
   tls: []
 
 resources:
