@@ -345,25 +345,30 @@ Azure DevOps URL: https://dev.azure.com/selvaesakkirajan/esedemo
 - ✅ Deploy stage (15-20 min)
   - Terraform init
   - Terraform plan
-  - Terraform apply (creates AKS, App Gateway, etc.)
-  - Helm deploy
+  - Terraform apply (creates AKS, ACR, network, App Insights)
+  - Helm deploy (creates pods + LoadBalancer service)
 
 ---
 
 ## 🟡 PHASE 8: VERIFY DEPLOYMENT (5 min)
 
-### STEP 8.1: Get Application Gateway Public IP
+### STEP 8.1: Get LoadBalancer Public IP
 
 **After pipeline completes:**
 
 1. Go to **Pipelines** → Your completed pipeline
-2. Click the **Deploy** stage
-3. Scroll down to find: **Get Application Gateway Public IP** task
-4. Look for: `Public IP Address: xxx.xxx.xxx.xxx`
+2. Click the **Deploy** stage → **Verify Helm deployment** task
+3. Look for: `--- LoadBalancer IP ---` followed by an IP address
+
+**Or run from PowerShell:**
+```powershell
+kubectl get svc python-api -n default
+```
+Copy the `EXTERNAL-IP` column value.
 
 **✅ SAVE this IP address:**
 ```
-APP_GATEWAY_IP = xxx.xxx.xxx.xxx
+LOADBALANCER_IP = xxx.xxx.xxx.xxx
 ```
 
 ---
@@ -427,7 +432,7 @@ PHASE 7 - FIRST RUN
 ☐ Wait for Deploy stage (20 min)
 
 PHASE 8 - VERIFY
-☐ Get Application Gateway public IP
+☐ Get LoadBalancer public IP (from Verify Helm deployment task)
 ☐ Test API endpoint
 ☐ Confirm response: {"sum":8}
 ```
@@ -464,20 +469,20 @@ PHASE 8 - VERIFY
 | "Service principal unauthorized" | Check subscription ID is correct in STEP 1.4 |
 | "Service connection failed" | Verify service principal ID and secret in STEP 3.3 |
 | "Pipeline not found" | Make sure azure-pipelines.yml is in repo root |
-| "API endpoint not responding" | Wait 2-3 minutes, then check App Gateway IP again |
+| "API endpoint not responding" | Wait 2-3 minutes for LoadBalancer IP to be assigned, then check `kubectl get svc python-api -n default` |
 
 ---
 
 ## ✅ DONE! 
 
 You now have:
-- ✅ Azure resources (AKS, ACR, App Gateway, App Insights)
+- ✅ Azure resources (AKS, ACR, App Insights)
 - ✅ Service principal for authentication
 - ✅ Azure DevOps pipeline configured
 - ✅ CI/CD automation (test → build → deploy)
 - ✅ Code quality checks (SonarCloud)
-- ✅ Live API running on Application Gateway
+- ✅ Live API exposed via Kubernetes LoadBalancer
 
-**Your API is live at:** `http://<APP_GATEWAY_IP>/sum?a=1&b=2`
+**Your API is live at:** `http://<LOADBALANCER_IP>/sum?a=1&b=2`
 
 🎉 **Complete!**
