@@ -8,11 +8,11 @@ spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: {{ include "python-api.name" . }}
+      {{- include "python-api.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ include "python-api.name" . }}
+        {{- include "python-api.selectorLabels" . | nindent 8 }}
     spec:
       {{- if .Values.image.pullSecret }}
       imagePullSecrets:
