@@ -14,7 +14,8 @@ service:
 ingress:
   enabled: true
   className: azure-application-gateway
-  annotations: {}
+  annotations:
+    appgw.io/health-probe-path: "/health"
   hosts:
     - host: ""
       paths:

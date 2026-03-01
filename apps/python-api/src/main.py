@@ -3,6 +3,14 @@ from typing import Optional
 
 app = FastAPI(title="eseDemo API")
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "eseDemo API"}
+
 @app.get("/sum")
 def sum_query(a: Optional[float] = Query(None), b: Optional[float] = Query(None), expr: Optional[str] = None):
     if expr:
