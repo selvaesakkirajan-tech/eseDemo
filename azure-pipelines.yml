@@ -172,10 +172,15 @@ stages:
                   fi
                 fi
 
-                # Remove stale App Insights from state before planning (avoids workspace_id immutable conflict)
-                if terraform state show module.appinsights.azurerm_application_insights.main >/dev/null 2>&1; then
-                  echo "Removing stale App Insights from Terraform state..."
-                  terraform state rm module.appinsights.azurerm_application_insights.main
+                # Import App Insights into state if it exists in Azure but not in state (idempotent)
+                APPINSIGHTS_ID="/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/dev-esedemo-rg/providers/Microsoft.Insights/components/dev-esedemo-appinsights"
+                if az monitor app-insights component show --app dev-esedemo-appinsights --resource-group dev-esedemo-rg >/dev/null 2>&1; then
+                  if ! terraform state show module.appinsights.azurerm_application_insights.main >/dev/null 2>&1; then
+                    echo "App Insights exists in Azure but not in state. Importing..."
+                    terraform import -var-file="$TFVARS_FILE" module.appinsights.azurerm_application_insights.main "$APPINSIGHTS_ID"
+                  else
+                    echo "App Insights already in Terraform state."
+                  fi
                 fi
 
                 terraform plan -var-file="$TFVARS_FILE" -out=tfplan
