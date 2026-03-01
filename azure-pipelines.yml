@@ -252,28 +252,17 @@ stages:
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
 
-                # Install AGIC via Helm using service principal auth
-                # Note: old appgwingress.blob.core.windows.net repo is gone (409); use GitHub Pages mirror
-                helm repo add agic-repo https://azure.github.io/application-gateway-kubernetes-ingress/helm/ || true
-                helm repo update agic-repo
+                # Enable AGIC via AKS managed add-on (no Helm repo needed)
+                APPGW_ID=$(az network application-gateway show \
+                  --name dev-esedemo-appgw \
+                  --resource-group $(AKS_RESOURCE_GROUP) \
+                  --query id -o tsv)
 
-                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-
-                # Build SP auth JSON for AGIC (avoid heredoc - YAML parser trips on <<)
-                AGIC_AUTH_JSON=$(printf '{"clientId":"%s","clientSecret":"%s","subscriptionId":"%s","tenantId":"%s","activeDirectoryEndpointUrl":"https://login.microsoftonline.com","resourceManagerEndpointUrl":"https://management.azure.com/","activeDirectoryGraphResourceId":"https://graph.windows.net/","sqlManagementEndpointUrl":"https://management.core.windows.net:8443/","galleryEndpointUrl":"https://gallery.azure.com/","managementEndpointUrl":"https://management.core.windows.net/"}' \
-                  "$servicePrincipalId" "$servicePrincipalKey" "$SUBSCRIPTION_ID" "$tenantId")
-                AGIC_AUTH_B64=$(echo "$AGIC_AUTH_JSON" | base64 -w 0)
-
-                helm upgrade --install agic agic-repo/ingress-azure \
-                  --namespace default \
-                  --set appgw.name=dev-esedemo-appgw \
-                  --set appgw.resourceGroup=$(AKS_RESOURCE_GROUP) \
-                  --set appgw.subscriptionId=$SUBSCRIPTION_ID \
-                  --set appgw.shared=false \
-                  --set armAuth.type=servicePrincipal \
-                  --set armAuth.secretJSON=$AGIC_AUTH_B64 \
-                  --set rbac.enabled=true \
-                  --wait --timeout 3m
+                az aks enable-addons \
+                  --resource-group $(AKS_RESOURCE_GROUP) \
+                  --name $(AKS_CLUSTER_NAME) \
+                  --addons ingress-appgw \
+                  --appgw-id $APPGW_ID
 
           - task: Bash@3
             displayName: 'Update Helm chart values'
