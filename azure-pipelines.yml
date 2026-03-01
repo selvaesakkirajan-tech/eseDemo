@@ -226,13 +226,15 @@ stages:
             inputs:
               helmVersionToInstall: '$(HELM_VERSION)'
 
-          - task: Bash@3
+          - task: AzureCLI@2
             displayName: 'Get AKS credentials'
             inputs:
-              targetType: 'inline'
-              script: |
-                az account set --subscription $(AZURE_SUBSCRIPTION_ID)
-                az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME)
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME) --overwrite-existing
 
           - task: Bash@3
             displayName: 'Update Helm chart values'
@@ -244,11 +246,14 @@ stages:
                 sed -i "s|<registry>|${REGISTRY_URL}|g" manifests/helm/python-api/values.yaml
                 sed -i "s|<image_tag>|${IMAGE_TAG}|g" manifests/helm/python-api/values.yaml
 
-          - task: Bash@3
+          - task: AzureCLI@2
             displayName: 'Deploy Helm chart to AKS'
             inputs:
-              targetType: 'inline'
-              script: |
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
                 helm upgrade \
                   --install python-api \
                   --namespace default \
@@ -257,11 +262,14 @@ stages:
                   --set image.tag="$(Build.BuildId)" \
                   manifests/helm/python-api
 
-          - task: Bash@3
+          - task: AzureCLI@2
             displayName: 'Verify Helm deployment'
             inputs:
-              targetType: 'inline'
-              script: |
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
                 kubectl rollout status deployment/python-api -n default --timeout=5m
                 kubectl get pods -n default
                 kubectl get svc -n default
