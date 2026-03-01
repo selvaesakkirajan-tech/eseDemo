@@ -253,8 +253,9 @@ stages:
                   --dry-run=client -o yaml | kubectl apply -f -
 
                 # Install AGIC via Helm using service principal auth
-                helm repo add application-gateway-kubernetes-ingress https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/ || true
-                helm repo update
+                # Note: old appgwingress.blob.core.windows.net repo is gone (409); use GitHub Pages mirror
+                helm repo add agic-repo https://azure.github.io/application-gateway-kubernetes-ingress/helm/ || true
+                helm repo update agic-repo
 
                 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 
@@ -263,7 +264,7 @@ stages:
                   "$servicePrincipalId" "$servicePrincipalKey" "$SUBSCRIPTION_ID" "$tenantId")
                 AGIC_AUTH_B64=$(echo "$AGIC_AUTH_JSON" | base64 -w 0)
 
-                helm upgrade --install agic application-gateway-kubernetes-ingress/ingress-azure \
+                helm upgrade --install agic agic-repo/ingress-azure \
                   --namespace default \
                   --set appgw.name=dev-esedemo-appgw \
                   --set appgw.resourceGroup=$(AKS_RESOURCE_GROUP) \
