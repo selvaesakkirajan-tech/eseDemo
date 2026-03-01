@@ -187,6 +187,13 @@ stages:
                 export ARM_CLIENT_SECRET=$servicePrincipalKey
                 export ARM_TENANT_ID=$tenantId
                 export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+                # Remove App Insights from state if it exists (allows clean recreation without workspace_id conflict)
+                if terraform state show module.appinsights.azurerm_application_insights.main >/dev/null 2>&1; then
+                  echo "Removing stale App Insights from Terraform state..."
+                  terraform state rm module.appinsights.azurerm_application_insights.main
+                fi
+
                 terraform apply -auto-approve tfplan
 
           - task: AzureCLI@2
