@@ -41,12 +41,6 @@ variable "docker_registry_id" {
   type = string
 }
 
-variable "appgw_id" {
-  type        = string
-  description = "Resource ID of the Application Gateway for AGIC add-on"
-  default     = ""
-}
-
 variable "tags" {
   type    = map(string)
   default = {}

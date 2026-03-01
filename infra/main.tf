@@ -68,30 +68,6 @@ module "network" {
   )
 }
 
-# Application Gateway with AGIC
-module "appgw_agic" {
-  source = "./modules/appgw_agic"
-
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  environment         = var.environment
-  project             = var.project
-  vnet_name           = module.network.vnet_name
-  appgw_subnet_cidr   = var.appgw_subnet_cidr
-  appgw_sku_name      = var.appgw_sku_name
-  appgw_sku_tier      = var.appgw_sku_tier
-  appgw_capacity      = var.appgw_capacity
-
-  tags = merge(
-    var.common_tags,
-    {
-      Environment = var.environment
-    }
-  )
-
-  depends_on = [module.network]
-}
-
 # AKS Cluster
 module "aks" {
   source = "./modules/aks"
@@ -106,7 +82,6 @@ module "aks" {
   vnet_subnet_id            = module.network.subnet_id
   docker_registry_url       = module.acr.login_server
   docker_registry_id        = module.acr.id
-  appgw_id                  = module.appgw_agic.appgw_id
 
   tags = merge(
     var.common_tags,
@@ -115,7 +90,7 @@ module "aks" {
     }
   )
 
-  depends_on = [module.network, module.acr, module.appgw_agic]
+  depends_on = [module.network, module.acr]
 }
 
 # Application Insights
@@ -156,27 +131,4 @@ output "resource_group_name" {
   description = "Resource group name"
 }
 
-output "appgw_public_ip" {
-  value       = module.appgw_agic.appgw_public_ip
-  description = "Application Gateway public IP address"
-}
 
-output "appgw_id" {
-  value       = module.appgw_agic.appgw_id
-  description = "Application Gateway resource ID"
-}
-
-output "appgw_name" {
-  value       = module.appgw_agic.appgw_name
-  description = "Application Gateway name"
-}
-
-output "agic_identity_id" {
-  value       = module.appgw_agic.agic_identity_id
-  description = "AGIC managed identity ID"
-}
-
-output "agic_client_id" {
-  value       = module.appgw_agic.agic_client_id
-  description = "AGIC client ID for use in Helm"
-}

@@ -190,29 +190,6 @@ stages:
 
                 terraform apply -auto-approve tfplan
 
-          - task: AzureCLI@2
-            displayName: 'Get Application Gateway Public IP'
-            inputs:
-              azureSubscription: 'azure-connection'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              addSpnToEnvironment: true
-              workingDirectory: '$(Build.SourcesDirectory)/infra'
-              inlineScript: |
-                export ARM_CLIENT_ID=$servicePrincipalId
-                export ARM_CLIENT_SECRET=$servicePrincipalKey
-                export ARM_TENANT_ID=$tenantId
-                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-                APPGW_IP=$(terraform output -raw appgw_public_ip)
-                echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_IP"
-                echo "==========================================="
-                echo "Application Gateway Deployment Successful!"
-                echo "==========================================="
-                echo "Public IP Address: $APPGW_IP"
-                echo "API Endpoint: http://$APPGW_IP/sum?a=1&b=2"
-                echo "Documentation: File APPLICATION_GATEWAY_SETUP.md"
-                echo "==========================================="
-
       - job: DeployToAKS
         displayName: 'Deploy to AKS with Helm'
         dependsOn: ProvisionInfra
@@ -237,30 +214,19 @@ stages:
                 az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME) --overwrite-existing
 
           - task: AzureCLI@2
-            displayName: 'Create ACR pull secret & install AGIC'
+            displayName: 'Create ACR pull secret'
             inputs:
               azureSubscription: 'azure-connection'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
               inlineScript: |
-                # Create ACR image pull secret in AKS
                 kubectl create secret docker-registry acr-secret \
                   --docker-server=$(ACR_REGISTRY_URL) \
                   --docker-username=$(ACR_USERNAME) \
                   --docker-password=$(ACR_PASSWORD) \
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
-
-                # AGIC is enabled via Terraform ingress_application_gateway block
-                # Wait for AGIC pod to be ready before deploying Ingress
-                echo "Waiting for AGIC pod to be ready..."
-                kubectl wait --for=condition=ready pod \
-                  -l app=ingress-appgw \
-                  -n kube-system \
-                  --timeout=5m || true
-                echo "AGIC pod status:"
-                kubectl get pods -n kube-system | grep ingress-appgw || true
 
           - task: Bash@3
             displayName: 'Update Helm chart values'
@@ -301,17 +267,5 @@ stages:
                 kubectl get pods -n default
                 echo "--- Services ---"
                 kubectl get svc -n default
-                echo "--- Ingress ---"
-                kubectl get ingress -n default -o wide
-                echo "--- AGIC pod status ---"
-                kubectl get pods -n kube-system | grep ingress-appgw || true
-                echo "--- AGIC logs (last 30 lines) ---"
-                kubectl logs -n kube-system -l app=ingress-appgw --tail=30 || true
-                echo "--- Waiting 90s for App Gateway backend probe to pass ---"
-                sleep 90
-                echo "--- Final backend health check ---"
-                az network application-gateway show-backend-health \
-                  --name dev-esedemo-appgw \
-                  --resource-group $(AKS_RESOURCE_GROUP) \
-                  --query 'backendAddressPools[].backendHttpSettingsCollection[].servers[].health' \
-                  -o tsv || true
+                echo "--- LoadBalancer IP ---"
+                kubectl get svc python-api -n default -o jsonpath='{.status.loadBalancer.ingress[0].ip}' && echo ""

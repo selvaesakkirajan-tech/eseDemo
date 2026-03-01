@@ -44,13 +44,6 @@ resource "azurerm_kubernetes_cluster" "main" {
   http_application_routing_enabled = false
   azure_policy_enabled             = true
 
-  dynamic "ingress_application_gateway" {
-    for_each = var.appgw_id != "" ? [1] : []
-    content {
-      gateway_id = var.appgw_id
-    }
-  }
-
   tags = var.tags
 
   depends_on = [azurerm_role_assignment.aks_acr_pull]

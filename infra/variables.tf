@@ -41,12 +41,6 @@ variable "subnet_cidr" {
   default     = "10.0.1.0/24"
 }
 
-variable "appgw_subnet_cidr" {
-  description = "Application Gateway subnet CIDR"
-  type        = string
-  default     = "10.0.2.0/24"
-}
-
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string
@@ -67,36 +61,6 @@ variable "vm_size" {
   description = "VM size for AKS nodes"
   type        = string
   default     = "Standard_B2s"
-}
-
-variable "appgw_sku_name" {
-  description = "Application Gateway SKU name"
-  type        = string
-  default     = "Standard_v2"
-  validation {
-    condition     = contains(["Standard_v2", "Standard", "WAF_v2", "WAF"], var.appgw_sku_name)
-    error_message = "Must be Standard_v2, Standard, WAF_v2, or WAF"
-  }
-}
-
-variable "appgw_sku_tier" {
-  description = "Application Gateway SKU tier"
-  type        = string
-  default     = "Standard_v2"
-  validation {
-    condition     = contains(["Standard_v2", "Standard", "WAF_v2", "WAF"], var.appgw_sku_tier)
-    error_message = "Must be Standard_v2, Standard, WAF_v2, or WAF"
-  }
-}
-
-variable "appgw_capacity" {
-  description = "Application Gateway capacity (instance count)"
-  type        = number
-  default     = 2
-  validation {
-    condition     = var.appgw_capacity >= 1 && var.appgw_capacity <= 125
-    error_message = "Capacity must be between 1 and 125"
-  }
 }
 
 variable "common_tags" {

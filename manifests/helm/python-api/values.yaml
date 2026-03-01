@@ -12,16 +12,7 @@ service:
   targetPort: 8080
 
 ingress:
-  enabled: true
-  className: azure-application-gateway
-  annotations:
-    appgw.io/health-probe-path: "/health"
-  hosts:
-    - host: ""
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
+  enabled: false
 
 resources:
   requests:
@@ -57,12 +48,4 @@ tolerations: []
 
 affinity: {}
 
-# ==========================================
-# Application Gateway Integration
-# ==========================================
-# Using Azure Application Gateway (AGIC) for external access
-# Access via: http://<APPGW_PUBLIC_IP>:80/
-# IP-only access (no domain names required)
-appGateway:
-  enabled: true
-  publicIP: "" # Auto-populated from Terraform output
+
