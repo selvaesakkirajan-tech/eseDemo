@@ -258,22 +258,9 @@ stages:
 
                 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 
-                # Build SP auth JSON for AGIC
-                AGIC_AUTH_JSON=$(cat <<EOF
-{
-  "clientId": "$servicePrincipalId",
-  "clientSecret": "$servicePrincipalKey",
-  "subscriptionId": "$SUBSCRIPTION_ID",
-  "tenantId": "$tenantId",
-  "activeDirectoryEndpointUrl": "https://login.microsoftonline.com",
-  "resourceManagerEndpointUrl": "https://management.azure.com/",
-  "activeDirectoryGraphResourceId": "https://graph.windows.net/",
-  "sqlManagementEndpointUrl": "https://management.core.windows.net:8443/",
-  "galleryEndpointUrl": "https://gallery.azure.com/",
-  "managementEndpointUrl": "https://management.core.windows.net/"
-}
-EOF
-)
+                # Build SP auth JSON for AGIC (avoid heredoc - YAML parser trips on <<)
+                AGIC_AUTH_JSON=$(printf '{"clientId":"%s","clientSecret":"%s","subscriptionId":"%s","tenantId":"%s","activeDirectoryEndpointUrl":"https://login.microsoftonline.com","resourceManagerEndpointUrl":"https://management.azure.com/","activeDirectoryGraphResourceId":"https://graph.windows.net/","sqlManagementEndpointUrl":"https://management.core.windows.net:8443/","galleryEndpointUrl":"https://gallery.azure.com/","managementEndpointUrl":"https://management.core.windows.net/"}' \
+                  "$servicePrincipalId" "$servicePrincipalKey" "$SUBSCRIPTION_ID" "$tenantId")
                 AGIC_AUTH_B64=$(echo "$AGIC_AUTH_JSON" | base64 -w 0)
 
                 helm upgrade --install agic application-gateway-kubernetes-ingress/ingress-azure \
