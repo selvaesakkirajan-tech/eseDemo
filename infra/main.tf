@@ -106,6 +106,7 @@ module "aks" {
   vnet_subnet_id            = module.network.subnet_id
   docker_registry_url       = module.acr.login_server
   docker_registry_id        = module.acr.id
+  appgw_id                  = module.appgw_agic.appgw_id
 
   tags = merge(
     var.common_tags,
@@ -114,7 +115,7 @@ module "aks" {
     }
   )
 
-  depends_on = [module.network, module.acr]
+  depends_on = [module.network, module.acr, module.appgw_agic]
 }
 
 # Application Insights

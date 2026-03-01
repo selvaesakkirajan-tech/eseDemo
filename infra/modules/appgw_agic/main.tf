@@ -124,6 +124,21 @@ output "appgw_name" {
   description = "Application Gateway name"
 }
 
+output "agic_identity_id" {
+  value       = azurerm_user_assigned_identity.agic.id
+  description = "AGIC managed identity resource ID"
+}
+
+output "agic_client_id" {
+  value       = azurerm_user_assigned_identity.agic.client_id
+  description = "AGIC client ID for use in Helm"
+}
+
+output "appgw_name" {
+  value       = azurerm_application_gateway.main.name
+  description = "Application Gateway name"
+}
+
 output "appgw_subnet_id" {
   value       = azurerm_subnet.appgw.id
   description = "App Gateway subnet ID"
