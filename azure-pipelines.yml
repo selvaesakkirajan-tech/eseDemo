@@ -252,31 +252,40 @@ stages:
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
 
-                # Install AGIC via Helm if not already installed
+                # Install AGIC via Helm using service principal auth
                 helm repo add application-gateway-kubernetes-ingress https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/ || true
                 helm repo update
 
-                AGIC_IDENTITY=$(az identity show \
-                  --name dev-esedemo-agic-identity \
-                  --resource-group $(AKS_RESOURCE_GROUP) \
-                  --query clientId -o tsv)
+                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 
-                APPGW_ID=$(az network application-gateway show \
-                  --name dev-esedemo-appgw \
-                  --resource-group $(AKS_RESOURCE_GROUP) \
-                  --query id -o tsv)
+                # Build SP auth JSON for AGIC
+                AGIC_AUTH_JSON=$(cat <<EOF
+{
+  "clientId": "$servicePrincipalId",
+  "clientSecret": "$servicePrincipalKey",
+  "subscriptionId": "$SUBSCRIPTION_ID",
+  "tenantId": "$tenantId",
+  "activeDirectoryEndpointUrl": "https://login.microsoftonline.com",
+  "resourceManagerEndpointUrl": "https://management.azure.com/",
+  "activeDirectoryGraphResourceId": "https://graph.windows.net/",
+  "sqlManagementEndpointUrl": "https://management.core.windows.net:8443/",
+  "galleryEndpointUrl": "https://gallery.azure.com/",
+  "managementEndpointUrl": "https://management.core.windows.net/"
+}
+EOF
+)
+                AGIC_AUTH_B64=$(echo "$AGIC_AUTH_JSON" | base64 -w 0)
 
                 helm upgrade --install agic application-gateway-kubernetes-ingress/ingress-azure \
                   --namespace default \
                   --set appgw.name=dev-esedemo-appgw \
                   --set appgw.resourceGroup=$(AKS_RESOURCE_GROUP) \
-                  --set appgw.subscriptionId=$(AZURE_SUBSCRIPTION_ID) \
+                  --set appgw.subscriptionId=$SUBSCRIPTION_ID \
                   --set appgw.shared=false \
-                  --set armAuth.type=aadPodIdentity \
-                  --set armAuth.identityResourceID=$(az identity show --name dev-esedemo-agic-identity --resource-group $(AKS_RESOURCE_GROUP) --query id -o tsv) \
-                  --set armAuth.identityClientID=$AGIC_IDENTITY \
+                  --set armAuth.type=servicePrincipal \
+                  --set armAuth.secretJSON=$AGIC_AUTH_B64 \
                   --set rbac.enabled=true \
-                  --wait --timeout 3m || true
+                  --wait --timeout 3m
 
           - task: Bash@3
             displayName: 'Update Helm chart values'
