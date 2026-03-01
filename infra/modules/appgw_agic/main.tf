@@ -81,13 +81,7 @@ resource "azurerm_application_gateway" "main" {
     priority                   = 1
   }
 
-  // AGIC managed resource indicator
-  tags = merge(
-    var.tags,
-    {
-      "agic.azure.io/enabled" = "true"
-    }
-  )
+  tags = var.tags
 }
 
 # User Assigned Identity for AGIC
