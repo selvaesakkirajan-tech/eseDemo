@@ -41,6 +41,12 @@ variable "subnet_cidr" {
   default     = "10.0.1.0/24"
 }
 
+variable "appgw_subnet_cidr" {
+  description = "App Gateway dedicated subnet CIDR (cannot overlap with AKS subnet)"
+  type        = string
+  default     = "10.0.2.0/24"
+}
+
 variable "kubernetes_version" {
   description = "Kubernetes version"
   type        = string

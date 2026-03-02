@@ -38,4 +38,15 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
- 
+          env:
+            - name: COSMOS_ENDPOINT
+              value: {{ .Values.cosmosdb.endpoint | quote }}
+            - name: COSMOS_DATABASE
+              value: {{ .Values.cosmosdb.database | quote }}
+            - name: COSMOS_CONTAINER
+              value: {{ .Values.cosmosdb.container | quote }}
+            - name: COSMOS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cosmosdb-secret
+                  key: cosmos-key

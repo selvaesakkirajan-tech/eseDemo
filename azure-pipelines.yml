@@ -62,12 +62,10 @@ stages:
               testRunTitle: 'API Unit Tests'
             condition: always()
 
-          - task: PublishCodeCoverageResults@1
+          - task: PublishCodeCoverageResults@2
             displayName: 'Publish code coverage'
             inputs:
-              codeCoverageTool: Cobertura
               summaryFileLocation: 'apps/python-api/coverage.xml'
-              reportDirectory: 'apps/python-api/htmlcov'
             condition: always()
 
           - task: Docker@2
@@ -176,6 +174,7 @@ stages:
 
           - task: AzureCLI@2
             displayName: 'Terraform Apply'
+            name: TerraformApply
             inputs:
               azureSubscription: 'azure-connection'
               scriptType: 'bash'
@@ -190,13 +189,64 @@ stages:
 
                 terraform apply -auto-approve tfplan
 
+                # Capture Cosmos DB outputs and pass them to downstream job
+                COSMOS_ENDPOINT=$(terraform output -raw cosmos_endpoint)
+                COSMOS_KEY=$(terraform output -raw cosmos_primary_key)
+                KV_NAME=$(terraform output -raw key_vault_name)
+                APPGW_ID=$(terraform output -raw appgw_id)
+                APPGW_NAME=$(terraform output -raw appgw_name)
+                APPGW_PUBLIC_IP=$(terraform output -raw appgw_public_ip)
+
+                echo "##vso[task.setvariable variable=COSMOS_ENDPOINT;isOutput=true]$COSMOS_ENDPOINT"
+                echo "##vso[task.setvariable variable=COSMOS_KEY;isOutput=true;issecret=true]$COSMOS_KEY"
+                echo "##vso[task.setvariable variable=KV_NAME;isOutput=true]$KV_NAME"
+                echo "##vso[task.setvariable variable=APPGW_ID;isOutput=true]$APPGW_ID"
+                echo "##vso[task.setvariable variable=APPGW_NAME;isOutput=true]$APPGW_NAME"
+                echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_PUBLIC_IP"
+
+          - task: AzureCLI@2
+            displayName: 'Store pipeline secrets into Key Vault'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                KV_NAME=$(TerraformApply.KV_NAME)
+
+                # Store ACR credentials
+                az keyvault secret set --vault-name "$KV_NAME" --name "ACR-USERNAME" --value "$(ACR_USERNAME)" --output none
+                az keyvault secret set --vault-name "$KV_NAME" --name "ACR-PASSWORD" --value "$(ACR_PASSWORD)" --output none
+
+                # Store Service Principal secret
+                az keyvault secret set --vault-name "$KV_NAME" --name "AZURE-CLIENT-SECRET" --value "$(AZURE_CLIENT_SECRET)" --output none
+
+                echo "Secrets stored in Key Vault: $KV_NAME"
+
       - job: DeployToAKS
         displayName: 'Deploy to AKS with Helm'
         dependsOn: ProvisionInfra
         pool:
           vmImage: 'ubuntu-latest'
+        variables:
+          COSMOS_ENDPOINT: $[ dependencies.ProvisionInfra.outputs['TerraformApply.COSMOS_ENDPOINT'] ]
+          COSMOS_KEY: $[ dependencies.ProvisionInfra.outputs['TerraformApply.COSMOS_KEY'] ]
+          KV_NAME: $[ dependencies.ProvisionInfra.outputs['TerraformApply.KV_NAME'] ]
+          APPGW_ID: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_ID'] ]
+          APPGW_NAME: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_NAME'] ]
+          APPGW_PUBLIC_IP: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_PUBLIC_IP'] ]
         steps:
           - checkout: self
+
+          - task: AzureKeyVault@2
+            displayName: 'Fetch secrets from Key Vault'
+            inputs:
+              azureSubscription: 'azure-connection'
+              KeyVaultName: '$(KV_NAME)'
+              SecretsFilter: 'ACR-USERNAME,ACR-PASSWORD,AZURE-CLIENT-SECRET,COSMOS-KEY,COSMOS-ENDPOINT,COSMOS-CONNECTION-STRING'
+              RunAsPreJob: false
+            # Secrets are now available as pipeline variables:
+            # $(ACR-USERNAME), $(ACR-PASSWORD), $(AZURE-CLIENT-SECRET)
+            # $(COSMOS-KEY), $(COSMOS-ENDPOINT), $(COSMOS-CONNECTION-STRING)
 
           - task: HelmInstaller@1
             displayName: 'Install Helm'
@@ -214,6 +264,36 @@ stages:
                 az aks get-credentials --resource-group $(AKS_RESOURCE_GROUP) --name $(AKS_CLUSTER_NAME) --overwrite-existing
 
           - task: AzureCLI@2
+            displayName: 'Install AGIC (App Gateway Ingress Controller)'
+            inputs:
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                # Add AGIC Helm repo
+                helm repo add application-gateway-kubernetes-ingress \
+                  https://appgwingress.blob.core.windows.net/ingress-azure-helm-package/
+                helm repo update
+
+                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+                # Install/upgrade AGIC Helm chart
+                helm upgrade --install ingress-azure \
+                  application-gateway-kubernetes-ingress/ingress-azure \
+                  --namespace default \
+                  --set appgw.name="$(APPGW_NAME)" \
+                  --set appgw.resourceGroup="$(AKS_RESOURCE_GROUP)" \
+                  --set appgw.subscriptionId="$SUBSCRIPTION_ID" \
+                  --set appgw.shared=false \
+                  --set armAuth.type=servicePrincipal \
+                  --set armAuth.secretJSON="$(AZURE-CLIENT-SECRET)" \
+                  --set rbac.enabled=true \
+                  --wait --timeout 5m
+
+                echo "AGIC installed. App Gateway: $(APPGW_NAME)"
+
+          - task: AzureCLI@2
             displayName: 'Create ACR pull secret'
             inputs:
               azureSubscription: 'azure-connection'
@@ -221,22 +301,27 @@ stages:
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
               inlineScript: |
+                # ACR creds now sourced from Key Vault (fetched above)
                 kubectl create secret docker-registry acr-secret \
                   --docker-server=$(ACR_REGISTRY_URL) \
-                  --docker-username=$(ACR_USERNAME) \
-                  --docker-password=$(ACR_PASSWORD) \
+                  --docker-username="$(ACR-USERNAME)" \
+                  --docker-password="$(ACR-PASSWORD)" \
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
 
-          - task: Bash@3
-            displayName: 'Update Helm chart values'
+          - task: AzureCLI@2
+            displayName: 'Create Cosmos DB secret'
             inputs:
-              targetType: 'inline'
-              script: |
-                REGISTRY_URL=$(ACR_REGISTRY_URL)
-                IMAGE_TAG=$(Build.BuildId)
-                sed -i "s|<registry>|${REGISTRY_URL}|g" manifests/helm/python-api/values.yaml
-                sed -i "s|<image_tag>|${IMAGE_TAG}|g" manifests/helm/python-api/values.yaml
+              azureSubscription: 'azure-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              addSpnToEnvironment: true
+              inlineScript: |
+                # Cosmos key sourced from Key Vault (fetched above)
+                kubectl create secret generic cosmosdb-secret \
+                  --from-literal=cosmos-key="$(COSMOS-KEY)" \
+                  --namespace=default \
+                  --dry-run=client -o yaml | kubectl apply -f -
 
           - task: AzureCLI@2
             displayName: 'Deploy Helm chart to AKS'
@@ -252,6 +337,7 @@ stages:
                   --values manifests/helm/python-api/values.yaml \
                   --set image.repository="$(ACR_REGISTRY_URL)/$(DOCKER_IMAGE_NAME)" \
                   --set image.tag="$(Build.BuildId)" \
+                  --set cosmosdb.endpoint="$(COSMOS-ENDPOINT)" \
                   manifests/helm/python-api
 
           - task: AzureCLI@2
@@ -267,5 +353,11 @@ stages:
                 kubectl get pods -n default
                 echo "--- Services ---"
                 kubectl get svc -n default
-                echo "--- LoadBalancer IP ---"
-                kubectl get svc python-api -n default -o jsonpath='{.status.loadBalancer.ingress[0].ip}' && echo ""
+                echo "--- Ingress ---"
+                kubectl get ingress -n default
+                echo ""
+                echo "=================================================="
+                echo "API is accessible via App Gateway public IP:"
+                echo "  http://$(APPGW_PUBLIC_IP)/sum?a=5&b=3"
+                echo "  curl -u kani:123 http://$(APPGW_PUBLIC_IP)/sum?a=5&b=3"
+                echo "=========================================="

@@ -65,3 +65,13 @@ output "kube_config" {
   value     = azurerm_kubernetes_cluster.main.kube_config_raw
   sensitive = true
 }
+
+output "identity_principal_id" {
+  value       = azurerm_user_assigned_identity.aks.principal_id
+  description = "AKS user-assigned identity principal ID (used for AGIC role assignment)"
+}
+
+output "identity_client_id" {
+  value       = azurerm_user_assigned_identity.aks.client_id
+  description = "AKS user-assigned identity client ID"
+}

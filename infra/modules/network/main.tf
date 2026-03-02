@@ -20,6 +20,14 @@ resource "azurerm_subnet" "aks" {
   ]
 }
 
+# Dedicated subnet for Application Gateway - CANNOT share with AKS
+resource "azurerm_subnet" "appgw" {
+  name                 = "${var.environment}-${var.project}-appgw-subnet"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = [var.appgw_subnet_cidr]
+}
+
 output "vnet_id" {
   value = azurerm_virtual_network.main.id
 }
@@ -34,5 +42,9 @@ output "subnet_id" {
 
 output "subnet_name" {
   value = azurerm_subnet.aks.name
+}
+
+output "appgw_subnet_id" {
+  value = azurerm_subnet.appgw.id
 }
 

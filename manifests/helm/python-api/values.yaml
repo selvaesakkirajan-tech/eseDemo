@@ -7,12 +7,25 @@ image:
   pullSecret: acr-secret
 
 service:
-  type: LoadBalancer
+  type: ClusterIP    # App Gateway (AGIC) handles external exposure - no LoadBalancer needed
   port: 80
   targetPort: 8080
 
 ingress:
-  enabled: false
+  enabled: true
+  className: "azure/application-gateway"
+  annotations:
+    kubernetes.io/ingress.class: "azure/application-gateway"
+  # No host set - AGIC routes by path on the App Gateway public IP
+  paths:
+    - path: /
+      pathType: Prefix
+
+cosmosdb:
+  endpoint: "<set-by-pipeline>"    # e.g. https://dev-esedemo-cosmos.documents.azure.com:443/
+  database: "apidb"
+  container: "users"
+  # cosmos-key is injected via Kubernetes secret 'cosmosdb-secret' (created by pipeline)
 
 resources:
   requests:
@@ -30,14 +43,14 @@ autoscaling:
 
 livenessProbe:
   httpGet:
-    path: /docs
+    path: /health
     port: 8080
   initialDelaySeconds: 30
   periodSeconds: 10
 
 readinessProbe:
   httpGet:
-    path: /docs
+    path: /health
     port: 8080
   initialDelaySeconds: 5
   periodSeconds: 5
