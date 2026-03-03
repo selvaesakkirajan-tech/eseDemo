@@ -135,34 +135,6 @@ stages:
                 terraform validate
 
           - task: AzureCLI@2
-            displayName: 'Recover soft-deleted Key Vault (if any)'
-            inputs:
-              azureSubscription: 'azure-connection'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              addSpnToEnvironment: true
-              inlineScript: |
-                # Azure soft-delete keeps a deleted vault's name reserved.
-                # If a vault with our expected name exists in soft-deleted state,
-                # recover it so Terraform can re-use it without a name conflict.
-                KV_NAME="dev-esedemo-kv"
-                SUBSCRIPTION_ID=$(az account show --query id -o tsv)
-
-                DELETED=$(az keyvault list-deleted \
-                  --subscription "$SUBSCRIPTION_ID" \
-                  --query "[?name=='$KV_NAME'].name" \
-                  -o tsv 2>/dev/null || true)
-
-                if [ -n "$DELETED" ]; then
-                  echo "Found soft-deleted Key Vault: $KV_NAME. Recovering..."
-                  az keyvault recover --name "$KV_NAME" --subscription "$SUBSCRIPTION_ID"
-                  echo "Recovery initiated. Waiting 30 s for DNS to populate..."
-                  sleep 30
-                else
-                  echo "No soft-deleted Key Vault found — nothing to recover."
-                fi
-
-          - task: AzureCLI@2
             displayName: 'Terraform Plan'
             inputs:
               azureSubscription: 'azure-connection'
@@ -220,35 +192,15 @@ stages:
                 # Capture Cosmos DB outputs and pass them to downstream job
                 COSMOS_ENDPOINT=$(terraform output -raw cosmos_endpoint)
                 COSMOS_KEY=$(terraform output -raw cosmos_primary_key)
-                KV_NAME=$(terraform output -raw key_vault_name)
                 APPGW_ID=$(terraform output -raw appgw_id)
                 APPGW_NAME=$(terraform output -raw appgw_name)
                 APPGW_PUBLIC_IP=$(terraform output -raw appgw_public_ip)
 
                 echo "##vso[task.setvariable variable=COSMOS_ENDPOINT;isOutput=true]$COSMOS_ENDPOINT"
                 echo "##vso[task.setvariable variable=COSMOS_KEY;isOutput=true;issecret=true]$COSMOS_KEY"
-                echo "##vso[task.setvariable variable=KV_NAME;isOutput=true]$KV_NAME"
                 echo "##vso[task.setvariable variable=APPGW_ID;isOutput=true]$APPGW_ID"
                 echo "##vso[task.setvariable variable=APPGW_NAME;isOutput=true]$APPGW_NAME"
                 echo "##vso[task.setvariable variable=APPGW_PUBLIC_IP;isOutput=true]$APPGW_PUBLIC_IP"
-
-          - task: AzureCLI@2
-            displayName: 'Store pipeline secrets into Key Vault'
-            inputs:
-              azureSubscription: 'azure-connection'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                KV_NAME=$(TerraformApply.KV_NAME)
-
-                # Store ACR credentials
-                az keyvault secret set --vault-name "$KV_NAME" --name "ACR-USERNAME" --value "$(ACR_USERNAME)" --output none
-                az keyvault secret set --vault-name "$KV_NAME" --name "ACR-PASSWORD" --value "$(ACR_PASSWORD)" --output none
-
-                # Store Service Principal secret
-                az keyvault secret set --vault-name "$KV_NAME" --name "AZURE-CLIENT-SECRET" --value "$(AZURE_CLIENT_SECRET)" --output none
-
-                echo "Secrets stored in Key Vault: $KV_NAME"
 
       - job: DeployToAKS
         displayName: 'Deploy to AKS with Helm'
@@ -258,53 +210,11 @@ stages:
         variables:
           COSMOS_ENDPOINT: $[ dependencies.ProvisionInfra.outputs['TerraformApply.COSMOS_ENDPOINT'] ]
           COSMOS_KEY: $[ dependencies.ProvisionInfra.outputs['TerraformApply.COSMOS_KEY'] ]
-          KV_NAME: $[ dependencies.ProvisionInfra.outputs['TerraformApply.KV_NAME'] ]
           APPGW_ID: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_ID'] ]
           APPGW_NAME: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_NAME'] ]
           APPGW_PUBLIC_IP: $[ dependencies.ProvisionInfra.outputs['TerraformApply.APPGW_PUBLIC_IP'] ]
         steps:
           - checkout: self
-
-          - task: AzureCLI@2
-            displayName: 'Wait for Key Vault DNS to resolve'
-            inputs:
-              azureSubscription: 'azure-connection'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                # Newly created (or recovered) vaults can take up to ~60 s to appear in DNS.
-                # Poll until the vault's management endpoint responds, then continue.
-                KV_NAME="$(KV_NAME)"
-                if [ -z "$KV_NAME" ]; then
-                  echo "##vso[task.logissue type=error]KV_NAME output variable is empty — Terraform Apply may have failed."
-                  exit 1
-                fi
-
-                MAX_RETRIES=18   # 18 × 10 s = 3 minutes max
-                SLEEP_SEC=10
-                for i in $(seq 1 $MAX_RETRIES); do
-                  STATUS=$(az keyvault show --name "$KV_NAME" --query "properties.provisioningState" -o tsv 2>/dev/null || echo "NOT_FOUND")
-                  if [ "$STATUS" = "Succeeded" ]; then
-                    echo "Key Vault '$KV_NAME' is ready (attempt $i)."
-                    exit 0
-                  fi
-                  echo "Attempt $i/$MAX_RETRIES — vault status: '$STATUS'. Retrying in ${SLEEP_SEC}s..."
-                  sleep $SLEEP_SEC
-                done
-
-                echo "##vso[task.logissue type=error]Key Vault '$KV_NAME' did not become ready within $(( MAX_RETRIES * SLEEP_SEC ))s."
-                exit 1
-
-          - task: AzureKeyVault@2
-            displayName: 'Fetch secrets from Key Vault'
-            inputs:
-              azureSubscription: 'azure-connection'
-              KeyVaultName: '$(KV_NAME)'
-              SecretsFilter: 'ACR-USERNAME,ACR-PASSWORD,AZURE-CLIENT-SECRET,COSMOS-KEY,COSMOS-ENDPOINT,COSMOS-CONNECTION-STRING'
-              RunAsPreJob: false
-            # Secrets are now available as pipeline variables:
-            # $(ACR-USERNAME), $(ACR-PASSWORD), $(AZURE-CLIENT-SECRET)
-            # $(COSMOS-KEY), $(COSMOS-ENDPOINT), $(COSMOS-CONNECTION-STRING)
 
           - task: HelmInstaller@1
             displayName: 'Install Helm'
@@ -345,7 +255,7 @@ stages:
                   --set appgw.subscriptionId="$SUBSCRIPTION_ID" \
                   --set appgw.shared=false \
                   --set armAuth.type=servicePrincipal \
-                  --set armAuth.secretJSON="$(AZURE-CLIENT-SECRET)" \
+                  --set armAuth.secretJSON="$(AZURE_CLIENT_SECRET)" \
                   --set rbac.enabled=true \
                   --wait --timeout 5m
 
@@ -359,11 +269,10 @@ stages:
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
               inlineScript: |
-                # ACR creds now sourced from Key Vault (fetched above)
                 kubectl create secret docker-registry acr-secret \
                   --docker-server=$(ACR_REGISTRY_URL) \
-                  --docker-username="$(ACR-USERNAME)" \
-                  --docker-password="$(ACR-PASSWORD)" \
+                  --docker-username="$(ACR_USERNAME)" \
+                  --docker-password="$(ACR_PASSWORD)" \
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
 
@@ -375,9 +284,8 @@ stages:
               scriptLocation: 'inlineScript'
               addSpnToEnvironment: true
               inlineScript: |
-                # Cosmos key sourced from Key Vault (fetched above)
                 kubectl create secret generic cosmosdb-secret \
-                  --from-literal=cosmos-key="$(COSMOS-KEY)" \
+                  --from-literal=cosmos-key="$(COSMOS_KEY)" \
                   --namespace=default \
                   --dry-run=client -o yaml | kubectl apply -f -
 
@@ -395,7 +303,7 @@ stages:
                   --values manifests/helm/python-api/values.yaml \
                   --set image.repository="$(ACR_REGISTRY_URL)/$(DOCKER_IMAGE_NAME)" \
                   --set image.tag="$(Build.BuildId)" \
-                  --set cosmosdb.endpoint="$(COSMOS-ENDPOINT)" \
+                  --set cosmosdb.endpoint="$(COSMOS_ENDPOINT)" \
                   manifests/helm/python-api
 
           - task: AzureCLI@2
